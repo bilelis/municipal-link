@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, Building2, TreePine, Store, Map } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -29,7 +29,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { mockBiens } from '@/data/mockData';
+import { api } from '@/lib/api';
 import { Bien, BienType, BienStatus } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -60,7 +60,8 @@ const statusLabels = {
 };
 
 export default function Biens() {
-  const [biens, setBiens] = useState<Bien[]>(mockBiens);
+  const [biens, setBiens] = useState<Bien[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -68,7 +69,6 @@ export default function Biens() {
   const [editingBien, setEditingBien] = useState<Bien | null>(null);
   const { toast } = useToast();
 
-  // Form state
   const [formData, setFormData] = useState({
     name: '',
     type: 'cafe' as BienType,
@@ -79,9 +79,25 @@ export default function Biens() {
     monthlyRent: '',
   });
 
+  const fetchBiens = async () => {
+    try {
+      const data = await api.biens.getAll();
+      setBiens(data);
+    } catch (error) {
+      console.error('Failed to fetch biens:', error);
+      toast({ title: 'Erreur', description: 'Impossible de charger les biens', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchBiens();
+  }, []);
+
   const filteredBiens = biens.filter(bien => {
     const matchesSearch = bien.name.toLowerCase().includes(search.toLowerCase()) ||
-                         bien.address.toLowerCase().includes(search.toLowerCase());
+      bien.address.toLowerCase().includes(search.toLowerCase());
     const matchesType = filterType === 'all' || bien.type === filterType;
     const matchesStatus = filterStatus === 'all' || bien.status === filterStatus;
     return matchesSearch && matchesType && matchesStatus;
@@ -118,35 +134,44 @@ export default function Biens() {
     setIsDialogOpen(true);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (editingBien) {
-      setBiens(biens.map(b => 
-        b.id === editingBien.id 
-          ? { ...b, ...formData, surface: parseFloat(formData.surface), monthlyRent: parseFloat(formData.monthlyRent) || undefined }
-          : b
-      ));
-      toast({ title: 'Bien modifié', description: 'Le bien a été mis à jour avec succès' });
-    } else {
-      const newBien: Bien = {
-        id: Date.now().toString(),
-        ...formData,
-        surface: parseFloat(formData.surface),
-        monthlyRent: parseFloat(formData.monthlyRent) || undefined,
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setBiens([...biens, newBien]);
-      toast({ title: 'Bien ajouté', description: 'Le nouveau bien a été créé avec succès' });
+
+    try {
+      if (editingBien) {
+        await api.biens.update({
+          ...editingBien,
+          ...formData,
+          surface: parseFloat(formData.surface),
+          monthlyRent: parseFloat(formData.monthlyRent) || undefined
+        });
+        toast({ title: 'Bien modifié', description: 'Le bien a été mis à jour avec succès' });
+      } else {
+        await api.biens.create({
+          ...formData,
+          surface: parseFloat(formData.surface),
+          monthlyRent: parseFloat(formData.monthlyRent) || undefined
+        });
+        toast({ title: 'Bien ajouté', description: 'Le nouveau bien a été créé avec succès' });
+      }
+      fetchBiens();
+      setIsDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      toast({ title: 'Erreur', description: 'Une erreur est survenue', variant: 'destructive' });
     }
-    
-    setIsDialogOpen(false);
-    resetForm();
   };
 
-  const handleDelete = (id: string) => {
-    setBiens(biens.filter(b => b.id !== id));
-    toast({ title: 'Bien supprimé', description: 'Le bien a été supprimé avec succès' });
+  const handleDelete = async (id: string) => {
+    if (confirm('Êtes-vous sûr de vouloir supprimer ce bien ?')) {
+      try {
+        await api.biens.delete(id);
+        toast({ title: 'Bien supprimé', description: 'Le bien a été supprimé avec succès' });
+        fetchBiens();
+      } catch (error) {
+        toast({ title: 'Erreur', description: 'Impossible de supprimer le bien', variant: 'destructive' });
+      }
+    }
   };
 
   return (
@@ -253,105 +278,109 @@ export default function Biens() {
           </Dialog>
         </div>
 
-        {/* Filters */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Rechercher par nom ou adresse..."
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    className="pl-10"
-                  />
+        {loading ? (
+          <div className="flex items-center justify-center h-40">Chargement...</div>
+        ) : (
+          <>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex flex-col md:flex-row gap-4">
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Rechercher par nom ou adresse..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tous les types</SelectItem>
+                      <SelectItem value="cafe">Café</SelectItem>
+                      <SelectItem value="jardin">Jardin d'Enfants</SelectItem>
+                      <SelectItem value="local">Local Commercial</SelectItem>
+                      <SelectItem value="terrain">Terrain</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Statut" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Tous les statuts</SelectItem>
+                      <SelectItem value="disponible">Disponible</SelectItem>
+                      <SelectItem value="loue">Loué</SelectItem>
+                      <SelectItem value="vendu">Vendu</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les types</SelectItem>
-                  <SelectItem value="cafe">Café</SelectItem>
-                  <SelectItem value="jardin">Jardin d'Enfants</SelectItem>
-                  <SelectItem value="local">Local Commercial</SelectItem>
-                  <SelectItem value="terrain">Terrain</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Statut" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les statuts</SelectItem>
-                  <SelectItem value="disponible">Disponible</SelectItem>
-                  <SelectItem value="loue">Loué</SelectItem>
-                  <SelectItem value="vendu">Vendu</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
 
-        {/* Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Liste des Biens ({filteredBiens.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Bien</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Adresse</TableHead>
-                  <TableHead>Surface</TableHead>
-                  <TableHead>Loyer</TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredBiens.map((bien) => {
-                  const Icon = typeIcons[bien.type];
-                  return (
-                    <TableRow key={bien.id}>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <span className="font-medium">{bien.name}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>{typeLabels[bien.type]}</TableCell>
-                      <TableCell className="max-w-[200px] truncate">{bien.address}</TableCell>
-                      <TableCell>{bien.surface} m²</TableCell>
-                      <TableCell>{bien.monthlyRent ? `${bien.monthlyRent} DT` : '-'}</TableCell>
-                      <TableCell>
-                        <Badge className={statusColors[bien.status]}>
-                          {statusLabels[bien.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(bien)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(bien.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
+            <Card>
+              <CardHeader>
+                <CardTitle>Liste des Biens ({filteredBiens.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Bien</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Adresse</TableHead>
+                      <TableHead>Surface</TableHead>
+                      <TableHead>Loyer</TableHead>
+                      <TableHead>Statut</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredBiens.map((bien) => {
+                      const Icon = typeIcons[bien.type];
+                      return (
+                        <TableRow key={bien.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                                <Icon className="h-5 w-5" />
+                              </div>
+                              <span className="font-medium">{bien.name}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{typeLabels[bien.type]}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{bien.address}</TableCell>
+                          <TableCell>{bien.surface} m²</TableCell>
+                          <TableCell>{bien.monthlyRent ? `${bien.monthlyRent} DT` : '-'}</TableCell>
+                          <TableCell>
+                            <Badge className={statusColors[bien.status]}>
+                              {statusLabels[bien.status]}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                              <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(bien)}>
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button variant="ghost" size="icon" onClick={() => handleDelete(bien.id)}>
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </MainLayout>
   );

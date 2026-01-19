@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Plus, Search, Edit, Trash2, ShoppingCart } from 'lucide-react';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { Button } from '@/components/ui/button';
@@ -27,18 +27,39 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { mockVentes, mockBiens } from '@/data/mockData';
-import { Vente } from '@/types';
+import { api } from '@/lib/api';
+import { Vente, Bien } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Ventes() {
-  const [ventes, setVentes] = useState<Vente[]>(mockVentes);
+  const [ventes, setVentes] = useState<Vente[]>([]);
+  const [biens, setBiens] = useState<Bien[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingVente, setEditingVente] = useState<Vente | null>(null);
   const { toast } = useToast();
 
-  const availableBiens = mockBiens.filter(b => b.status === 'disponible');
+  const fetchData = async () => {
+    try {
+      const [ventesData, biensData] = await Promise.all([
+        api.ventes.getAll(),
+        api.biens.getAll()
+      ]);
+      setVentes(ventesData);
+      setBiens(biensData);
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+      toast({ title: 'Erreur', description: 'Impossible de charger les données', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const availableBiens = biens.filter(b => b.status === 'disponible');
 
   const [formData, setFormData] = useState({
     bienId: '',
@@ -63,57 +84,23 @@ export default function Ventes() {
       salePrice: '',
       saleDate: '',
     });
-    setEditingVente(null);
   };
 
-  const handleOpenDialog = (vente?: Vente) => {
-    if (vente) {
-      setEditingVente(vente);
-      setFormData({
-        bienId: vente.bienId,
-        buyerName: vente.buyerName,
-        buyerPhone: vente.buyerPhone,
-        buyerEmail: vente.buyerEmail,
-        salePrice: vente.salePrice.toString(),
-        saleDate: vente.saleDate,
-      });
-    } else {
-      resetForm();
-    }
-    setIsDialogOpen(true);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    const selectedBien = mockBiens.find(b => b.id === formData.bienId);
-    
-    if (editingVente) {
-      setVentes(ventes.map(v => 
-        v.id === editingVente.id 
-          ? { ...v, ...formData, bienName: selectedBien?.name || '', salePrice: parseFloat(formData.salePrice) }
-          : v
-      ));
-      toast({ title: 'Vente modifiée', description: 'La vente a été mise à jour avec succès' });
-    } else {
-      const newVente: Vente = {
-        id: Date.now().toString(),
-        ...formData,
-        bienName: selectedBien?.name || '',
-        salePrice: parseFloat(formData.salePrice),
-        createdAt: new Date().toISOString().split('T')[0],
-      };
-      setVentes([...ventes, newVente]);
-      toast({ title: 'Vente enregistrée', description: 'La nouvelle vente a été enregistrée' });
-    }
-    
-    setIsDialogOpen(false);
-    resetForm();
-  };
 
-  const handleDelete = (id: string) => {
-    setVentes(ventes.filter(v => v.id !== id));
-    toast({ title: 'Vente supprimée', description: 'La vente a été supprimée avec succès' });
+    try {
+      await api.ventes.create({
+        ...formData,
+        salePrice: parseFloat(formData.salePrice)
+      });
+      toast({ title: 'Vente enregistrée', description: 'La nouvelle vente a été enregistrée' });
+      fetchData();
+      setIsDialogOpen(false);
+      resetForm();
+    } catch (error) {
+      toast({ title: 'Erreur', description: 'Une erreur est survenue', variant: 'destructive' });
+    }
   };
 
   const totalVentes = ventes.reduce((sum, v) => sum + v.salePrice, 0);
@@ -128,14 +115,14 @@ export default function Ventes() {
           </div>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button onClick={() => handleOpenDialog()}>
+              <Button onClick={() => { resetForm(); setIsDialogOpen(true); }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Nouvelle Vente
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle>{editingVente ? 'Modifier la Vente' : 'Enregistrer une Vente'}</DialogTitle>
+                <DialogTitle>Enregistrer une Vente</DialogTitle>
               </DialogHeader>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
@@ -204,101 +191,96 @@ export default function Ventes() {
                   </div>
                 </div>
                 <Button type="submit" className="w-full">
-                  {editingVente ? 'Mettre à jour' : 'Enregistrer la vente'}
+                  Enregistrer la vente
                 </Button>
               </form>
             </DialogContent>
           </Dialog>
         </div>
 
-        {/* Stats */}
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Nombre de Ventes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{ventes.length}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium">Total des Ventes</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalVentes.toLocaleString()} DT</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filters */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Rechercher par bien ou acheteur..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10"
-              />
+        {loading ? (
+          <div className="flex items-center justify-center h-40">Chargement...</div>
+        ) : (
+          <>
+            {/* Stats */}
+            <div className="grid gap-4 md:grid-cols-2">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Nombre de Ventes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{ventes.length}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">Total des Ventes</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalVentes.toLocaleString()} DT</div>
+                </CardContent>
+              </Card>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Historique des Ventes ({filteredVentes.length})</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Bien</TableHead>
-                  <TableHead>Acheteur</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Prix</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredVentes.map((vente) => (
-                  <TableRow key={vente.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                          <ShoppingCart className="h-5 w-5" />
-                        </div>
-                        <span className="font-medium">{vente.bienName}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{vente.buyerName}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm">{vente.buyerPhone}</p>
-                        <p className="text-sm text-muted-foreground">{vente.buyerEmail}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-medium">{vente.salePrice.toLocaleString()} DT</TableCell>
-                    <TableCell>{vente.saleDate}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => handleOpenDialog(vente)}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleDelete(vente.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+            {/* Filters */}
+            <Card>
+              <CardContent className="pt-6">
+                <div className="relative max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Rechercher par bien ou acheteur..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Table */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Historique des Ventes ({filteredVentes.length})</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Bien</TableHead>
+                      <TableHead>Acheteur</TableHead>
+                      <TableHead>Contact</TableHead>
+                      <TableHead>Prix</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredVentes.map((vente) => (
+                      <TableRow key={vente.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                              <ShoppingCart className="h-5 w-5" />
+                            </div>
+                            <span className="font-medium">{vente.bienName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>{vente.buyerName}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm">{vente.buyerPhone}</p>
+                            <p className="text-sm text-muted-foreground">{vente.buyerEmail}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{vente.salePrice.toLocaleString()} DT</TableCell>
+                        <TableCell>{vente.saleDate}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </MainLayout>
   );

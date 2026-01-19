@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthState, UserRole } from '@/types';
-import { mockUsers } from '@/data/mockData';
+import { api } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<boolean>;
@@ -15,40 +16,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     user: null,
     isAuthenticated: false,
   });
+  const { toast } = useToast();
 
   useEffect(() => {
-    // Check for stored user on mount
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      try {
-        const user = JSON.parse(storedUser);
-        setAuthState({ user, isAuthenticated: true });
-      } catch {
-        localStorage.removeItem('user');
-      }
+    const user = localStorage.getItem('user');
+    const token = localStorage.getItem('token');
+    if (user && token) {
+      setAuthState({ user: JSON.parse(user), isAuthenticated: true });
     }
   }, []);
 
-  const login = async (email: string, password: string): Promise<boolean> => {
-    // Mock authentication - in real app, this would call an API
-    const user = mockUsers.find(u => u.email === email && u.isActive);
-    
-    if (user && password === 'password123') {
-      setAuthState({ user, isAuthenticated: true });
-      localStorage.setItem('user', JSON.stringify(user));
-      return true;
+  const login = async (email: string, password: string) => {
+    try {
+      const resp = await api.auth.login({ email, password });
+
+      if (resp.success) {
+        localStorage.setItem('user', JSON.stringify(resp.user));
+        localStorage.setItem('token', resp.token);
+        setAuthState({ user: resp.user, isAuthenticated: true });
+
+        toast({
+          title: "Connexion réussie",
+          description: `Bienvenue, ${resp.user.name}`,
+        });
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      toast({
+        title: "Échec de connexion",
+        description: err.message,
+        variant: "destructive",
+      });
+      return false;
     }
-    return false;
   };
 
   const logout = () => {
-    setAuthState({ user: null, isAuthenticated: false });
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
+    setAuthState({ user: null, isAuthenticated: false });
+    window.location.href = '/login';
   };
 
-  const hasRole = (roles: UserRole[]): boolean => {
-    if (!authState.user) return false;
-    return roles.includes(authState.user.role);
+  const hasRole = (roles: UserRole[]) => {
+    return authState.user ? roles.includes(authState.user.role) : false;
   };
 
   return (
@@ -60,8 +72,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error("useAuth must be used within AuthProvider");
   return context;
 };

@@ -1,41 +1,45 @@
+import React, { useEffect, useState } from 'react';
 import { Building2, Key, ShoppingCart, CreditCard, AlertTriangle, TrendingUp } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { MainLayout } from '@/components/layout/MainLayout';
-import { mockBiens, mockLocations, mockPaiements, mockVentes } from '@/data/mockData';
-import { DashboardStats } from '@/types';
+import { api } from '@/lib/api';
+import { DashboardStats, Paiement } from '@/types';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-
-function calculateStats(): DashboardStats {
-  const totalBiens = mockBiens.length;
-  const biensLoues = mockBiens.filter(b => b.status === 'loue').length;
-  const biensVendus = mockBiens.filter(b => b.status === 'vendu').length;
-  const biensDisponibles = mockBiens.filter(b => b.status === 'disponible').length;
-  
-  const revenusMensuels = mockLocations
-    .filter(l => l.status === 'active')
-    .reduce((sum, l) => sum + l.monthlyRent, 0);
-  
-  const revenusAnnuels = revenusMensuels * 12;
-  
-  const paiementsEnRetard = mockPaiements.filter(p => p.status === 'overdue').length;
-  const contratsActifs = mockLocations.filter(l => l.status === 'active').length;
-
-  return {
-    totalBiens,
-    biensLoues,
-    biensVendus,
-    biensDisponibles,
-    revenusMensuels,
-    revenusAnnuels,
-    paiementsEnRetard,
-    contratsActifs,
-  };
-}
 
 const COLORS = ['hsl(var(--primary))', 'hsl(var(--destructive))', 'hsl(var(--muted-foreground))'];
 
 export default function Dashboard() {
-  const stats = calculateStats();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentPaiements, setRecentPaiements] = useState<Paiement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [statsData, paiementsData] = await Promise.all([
+          api.stats.getDashboard(),
+          api.paiements.getAll()
+        ]);
+        setStats(statsData);
+        setRecentPaiements(paiementsData.slice(0, 5));
+      } catch (error) {
+        console.error('Failed to fetch dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  if (loading || !stats) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center h-[50vh]">
+          Chargement...
+        </div>
+      </MainLayout>
+    );
+  }
 
   const pieData = [
     { name: 'Loués', value: stats.biensLoues },
@@ -44,12 +48,10 @@ export default function Dashboard() {
   ];
 
   const revenueData = [
-    { month: 'Jan', revenus: 4100 },
-    { month: 'Fév', revenus: 4100 },
-    { month: 'Mar', revenus: 4100 },
-    { month: 'Avr', revenus: 4100 },
-    { month: 'Mai', revenus: 4100 },
-    { month: 'Jun', revenus: 4100 },
+    { month: 'Jan', revenus: stats.revenusMensuels },
+    { month: 'Fév', revenus: stats.revenusMensuels },
+    { month: 'Mar', revenus: stats.revenusMensuels },
+    // In a real app, this would be fetched from a historical endpoint
   ];
 
   return (
@@ -173,7 +175,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockPaiements.slice(0, 5).map((paiement) => (
+              {recentPaiements.map((paiement) => (
                 <div key={paiement.id} className="flex items-center justify-between border-b pb-3 last:border-0">
                   <div className="flex items-center gap-3">
                     <CreditCard className="h-5 w-5 text-muted-foreground" />
@@ -184,12 +186,11 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right">
                     <p className="font-medium">{paiement.amount} DT</p>
-                    <p className={`text-sm ${
-                      paiement.status === 'paid' ? 'text-green-600' :
-                      paiement.status === 'overdue' ? 'text-destructive' : 'text-yellow-600'
-                    }`}>
+                    <p className={`text-sm ${paiement.status === 'paid' ? 'text-green-600' :
+                        paiement.status === 'overdue' ? 'text-destructive' : 'text-yellow-600'
+                      }`}>
                       {paiement.status === 'paid' ? 'Payé' :
-                       paiement.status === 'overdue' ? 'En retard' : 'En attente'}
+                        paiement.status === 'overdue' ? 'En retard' : 'En attente'}
                     </p>
                   </div>
                 </div>
